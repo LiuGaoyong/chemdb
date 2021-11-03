@@ -40,7 +40,7 @@ class VaspParse:
     def __init__(self, origin_dir='.', target_dir='.'):
         self.origin_dir = origin_dir
         self.target_dir = target_dir
-        if os.path.exists(os.path.join(origin_dir, 'vasprun.xml')):
+        if os.path.exists(os.path.joi, parse_potcar_file=Falsen(origin_dir, 'vasprun.xml')):
             self.vasprun = Vasprun(os.path.join(origin_dir, 'vasprun.xml'), parse_potcar_file=False)
         else:
             print('DIR: '+origin_dir+" don't have a vasprun.xml file, please CHECK!")

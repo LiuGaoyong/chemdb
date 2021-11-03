@@ -34,7 +34,8 @@ for i in ("sdf_roadmap-2011-09-23-1",
               "{}\t".format(inchi) +
               "{}\t".format(inchikey) +
               "{}\t".format(img) )
-            elements = "-".join(set(sdf.atoms.symbols[:]))
+            elements = "-".join(sorted(list(set(sdf.atoms.symbols[:]))))
+            print("\n",elements, "\n")
             tmp = [_id, fo, name, wght, cas, inchi, inchikey, img, elements]
             result.append(tmp)
         except Exception as e:

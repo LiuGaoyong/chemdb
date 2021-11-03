@@ -13,7 +13,7 @@ num,result = 0, []
 for i in ("cod",
           "amcsd"):
     a = test.all_id_from(i,1000)
-    a = list(random.sample(a,20))
+    a = list(random.sample(a,30))
     _num = 0
     for key in a:
         num += 1
@@ -27,7 +27,7 @@ for i in ("cod",
             name = fo
             _id = "{:02d}_{}".format(num, fo)
             img = sdf.draw_structure("{:03d}".format(num))
-            elements = "-".join(set(sdf.atoms.symbols[:]))
+            elements = "-".join(sorted(list(set(sdf.atoms.symbols[:]))))
             latt_para = sdf.atoms.cell.cellpar()
             assert len(latt_para) == 6
             tmp = [_id, fo, name, sg ]
