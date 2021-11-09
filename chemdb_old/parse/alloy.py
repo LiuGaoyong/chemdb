@@ -76,33 +76,64 @@ class VASP():
 
 
 if __name__ == "__main__":
-    test = get_all_folder_has("/home/lgy/Documents/0-MGE/1/", "OUTCAR")
+    if not os.path.exists("alloy_gen"):
+        os.mkdir("alloy_gen")
+    os.chdir("alloy_gen")
+    test = get_all_folder_has("/media/lgy/Elements/23alloy_slab_adsorption_z_diff/1", "OUTCAR")
     test = random.sample(test, 15)
     result, num = [],0
     for i in test:
-        num += 1
-        _id = "{:03d}".format(num)
-        i = VASP(i)
-        fo = i.formula
+        _id  = None
+        img  = None
+        name = None
+        formula = None
+        weight  = None
+        cas     = None
+        inchi     = None
+        inchikey  = None
+        downloads = None
+        elements  = None
+        typed     = None
+        spacegroup = None
+        a,b,c = None, None, None
+        alpha, beta, gamma = None, None, None
+        energy = None
+        efermi = None
+        s_band, p_band, d_band = None, None, None
+        attach = None
+        try:
+            num += 1
+            _id = "{:07d}".format(num)
+            i = VASP(i)
+        except Exception as e:
+            print("fdgasdf")
+            num -= 1
+            continue
+        formula = i.formula
         name = i.formula
-        eng = i.energy
-        ef = i.efermi
-        s = i.band_center("s")
-        p = i.band_center("p")
-        d = i.band_center("d")
-        tmp = [_id, fo, name, eng, ef, s,p,d]
-        tmp.extend(i.atoms.cell.cellpar())
-        img = i.draw_structure("{:03d}".format(num))
-        elements = "-".join(sorted(list(set(i.atoms.symbols[:]))))
-        tmp.extend([img, elements])
-        print(tmp)
+        energy = i.energy
+        efermi = i.efermi
+        s_band = i.band_center("s")
+        p_band = i.band_center("p")
+        d_band = i.band_center("d")
+
+        if not os.path.exists("img"): os.makedirs("img")
+        img = i.draw_structure("img/alloy-{:03d}".format(num))
+        elements = "-".join([str(i) for i in sorted(list(set(i.atoms.numbers)))])
+        a,b,c,alpha,beta,gamma = i.atoms.cell.cellpar()
+
+        tmp = [_id, img, name, formula, weight, cas, inchi, inchikey,
+                downloads, elements, typed, spacegroup, a, b, c,
+                alpha, beta, gamma, energy, efermi, 
+                s_band, p_band, d_band, attach]
         result.append(tmp)
-    result = pd.DataFrame(result, columns=[
-        "id", "formula","name","energy", "efermi", 
-        "s band center", "p band center", "d band center",
-        "a", "b", "c", "alpha", "beta", "gamma", 
-        "image_path", "elements"])
+    result = pd.DataFrame(result, columns=['id', 'img', 'name', 
+                'formula', 'weight', 'cas', 'inchi', 'inchikey',
+                'downloads', 'elements', 'typed', 'spacegroup', 'a', 'b', 'c',
+                'alpha', 'beta', 'gamma', 'energy', 'efermi', 
+                's_band', 'p_band', 'd_band', 'attach'])
     result.to_csv("data.csv")
     print(result)
+    os.chdir("..")
 
         
