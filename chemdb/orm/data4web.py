@@ -4,7 +4,7 @@ from bson.binary import Binary
 from uuid import NAMESPACE_DNS, uuid5
 from ase.io.sdf import read_sdf
 from sqlalchemy_utils import database_exists, create_database
-from sqlalchemy import Table, Column, create_engine, MetaData
+from sqlalchemy import Table, Column, create_engine, MetaData, inspect
 from sqlalchemy import Integer, Float, LargeBinary, UnicodeText, Boolean
 
 class ChemCache():
@@ -32,7 +32,7 @@ class ChemCache():
             "metal_oxide"]
         self.table = dict()
         for name in tablenames:
-            if name not in self.engine.table_names():
+            if name not in inspect(self.engine).get_table_names():
                 self.table[name] = Table(name, self.metadata,
                     Column("id",      Integer, primary_key=True),
                     Column("img",     UnicodeText, index=True, unique=True),
@@ -62,17 +62,43 @@ class ChemCache():
             else:
                 self.metadata = MetaData(self.engine)
                 self.table[name] = Table(name, self.metadata, autoload=True)
-
     
+    def get_one(self, tablename, key):
+        table = self.table[tablename]
+        conn = self.engine.connect()
+        if isinstance(key, int):
+            rows = conn.execute(select([table]).where(table.c.id == key))
+        elif isinstance(key, str):
+            rows = conn.execute(select([table]).where(table.c.uuid == key))
+        else:
+            raise TypeError("key must be int|str typed")
+        return [i for i in rows]
+
+    def _scan_alloy2sql(self, folder:str):
+        assert os.path.exists(folder)
+        result = []
+        for root,dirs,files in os.walk(top):
+            for name in files:
+                fname = os.path.join(root, name)
+                if "vasprun.xml" in fname:
+                    result.append(os.path.dirname(fname))
+        for i in result:
+            pass
+            
 
 if __name__ == "__main__":
     from urllib.parse import quote_plus
+    from sqlalchemy.sql import select
+
     passwd = quote_plus("chem123@G505")
     db_url = "mysql+pymysql://chem:{}".format(passwd) + \
              "@114.212.167.205:13306/{}?charset=utf8"
     test = ChemCache(db_url)
-    print(test.table)
-    print()
+    #nci_open = test.table['nci_open']
+    #conn = test.engine.connect()
+    #rows = conn.execute(select(nci_open.c.id))
+    #print(type(rows))
+
 
     
 

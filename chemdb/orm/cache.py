@@ -3,9 +3,12 @@ import pickle, zlib, os
 from bson.binary import Binary
 from uuid import NAMESPACE_DNS, uuid5
 from ase.io.sdf import read_sdf
+from ase.io import read
 from sqlalchemy_utils import database_exists, create_database
-from sqlalchemy import Table, Column, create_engine, MetaData
+from sqlalchemy import Table, Column, create_engine, MetaData, inspect
 from sqlalchemy import Integer, LargeBinary, UnicodeText, Boolean
+from sqlalchemy.sql import select, insert
+from pymongo import MongoClient
 
 class ChemCache():
     metadata = MetaData()
@@ -19,6 +22,7 @@ class ChemCache():
             pool_size=8,        # 连接池的大小，默认为5个，设置为0时表示连接无限制
             pool_recycle=60*30  # 设置时间以限制数据库多久没连接自动断开
         )
+        self.inspect = inspect(self.engine)
         self.__init_table()
         
     
@@ -32,7 +36,7 @@ class ChemCache():
             "alloy_ads"]
         self.table = dict()
         for name in tablenames:
-            if name not in self.engine.table_names():
+            if name not in self.inspect.get_table_names():
                 self.table[name] = Table(name, self.metadata,
                     Column("id", Integer, primary_key=True),
                     Column("uuid", UnicodeText, unique=True, index=True),
@@ -75,6 +79,61 @@ class ChemCache():
                 if line == '':
                     conn.execute(self.table[tablename].insert(), insert_list)
                     break
+
+    def _scan_cif2sql(self, tablename):
+        mongo = MongoClient("mongodb://root:LGY1990907u-mongo@114.212.167.205:27017")
+        col = mongo["cache"][tablename]
+        conn = self.engine.connect()
+        clock, insert_list = 0, list()
+        for i in col.find():
+            contents = i['result']
+            contents = zlib.decompress(contents)
+            contents = pickle.loads(contents)
+            uuid = uuid5(NAMESPACE_DNS, contents)
+            with open("/tmp/CIF.cif", "w") as f:
+                f.write(contents)
+            try:
+                can_by_ase = True
+                atoms = read("/tmp/CIF.cif", format="cif")
+                print(atoms)
+                clock += 1
+            except Exception as e:
+                can_by_ase = True
+                continue
+            try:
+                conn.execute(self.table[tablename].insert(), {"uuid": str(uuid), 
+                    "contents":i['result'], "can_by_ase":can_by_ase})
+            except Exception as e:
+                print(e)
+                continue
+            if clock > 10:
+                break
+        conn.execute(self.table[tablename].insert(), insert_list)
+
+    def get_one(self, tablename, key):
+        table = self.table[tablename]
+        conn = self.engine.connect()
+        if isinstance(key, int):
+            rows = conn.execute(select([table]).where(table.c.id == key))
+        elif isinstance(key, str):
+            rows = conn.execute(select([table]).where(table.c.uuid == key))
+        else:
+            raise TypeError("key must be int|str typed")
+        result = [i for i in rows]
+        assert len(result) == 1
+        return result[0]
+
+    def get_all_id_can_by_ase(self, tablename):
+        tb = self.table[tablename]
+        conn = self.engine.connect()
+        rows = conn.execute(select(tb.c.id).where(tb.c.can_by_ase==1))
+        return [i for i, in rows.fetchall()]
+
+    
+
+
+
+
             
 
 
@@ -84,20 +143,13 @@ if __name__ == "__main__":
     db_url = "mysql+pymysql://chem:{}".format(passwd) + \
              "@114.212.167.205:13306/{}?charset=utf8"
     test = ChemCache(db_url)
-    print(test.table)
-    print()
+    all_can_by_ase = test.get_all_id_can_by_ase('nci_open')
+    print(all_can_by_ase)
+    for i in all_can_by_ase[:3]:
+        print(test.get_one("nci_open", i))
 
-    dirs = "/home/data/sync/hp-ChemDB_Files/sdf"
-    sdf = {
-        "nci_open": os.path.join(dirs, "NCI-Open_2012-05-01.sdf"),
-        "roadmap": os.path.join(dirs, "roadmap-2011-09-23-1.sdf")
-    }
 
-    test._scan_sdf2sql(sdf["nci_open"], "nci_open")
-    print()
-    print("="*32)
-    print()
-    test._scan_sdf2sql(sdf["roadmap"], "roadmap")
+
 
 
 
