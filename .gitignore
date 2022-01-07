@@ -1,5 +1,6 @@
 .vscode/
 test*
+*.session.sql
 
 
 # Byte-compiled / optimized / DLL files

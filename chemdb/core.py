@@ -2,11 +2,11 @@
 import os, hashlib
 import time, uuid
 import dpdata, json
+import sqlalchemy
 import pandas as pd
-from typing import List, Union
+from typing import List
 from pathlib import Path
-from sqlalchemy import create_engine
-from sqlalchemy.engine.base import Engine
+from sqlalchemy_utils import database_exists, create_database
 from multiprocessing.dummy import Pool
 
 from chemdb.utils import get_all_dirs as all_dirs
@@ -14,37 +14,85 @@ from chemdb.utils import FileContents
 
 
 class ChemDB():
-    def __init__(self, data:List[Path], engine:Union[str, Engine], parallel:bool=False):
+
+    TB_INFO = {
+        "main": { 'id'              : sqlalchemy.types.Text(),             
+                'software'          : sqlalchemy.types.Text(),
+                'files_hash_json'   : sqlalchemy.types.Text(),
+                'type_of_elements'  : sqlalchemy.types.Text(),
+                'type_of_systems'   : sqlalchemy.types.Text(),
+                'num_of_point'      : sqlalchemy.types.Integer() },
+        "files": {'hash'            : sqlalchemy.types.Text(),
+                'binary_contents'   : sqlalchemy.types.LargeBinary() }
+    }
+    TB_NMAES = set(TB_INFO.keys())
+
+
+    def __init__(self, db_url:str=None, parallel:bool=False):
         self.parallel = parallel
         # setup SQL engine
-        if not isinstance(engine, Engine):
-            engine = create_engine(engine)
-        self.engine = engine
+        if db_url is None: db_url = "sqlite:///:memory:"
+        if not database_exists(db_url):
+            create_database(db_url)
+        self.engine = sqlalchemy.create_engine(db_url)#,
+        #    echo=True,          # 当设置为True时会将orm语句转化为sql语句打印，一般debug的时候可用
+        #    pool_size=8,        # 连接池的大小，默认为5个，设置为0时表示连接无限制
+        #    pool_recycle=60*30  # 设置时间以限制数据库多久没连接自动断开
+        #)
+        self.inspct = sqlalchemy.inspect(self.engine)
+        self.is_empty  = self.__is_empty()
+        self.is_chemdb = self.__url_is_for_chemdb()
+        if not (self.is_empty or self.is_chemdb):
+            raise KeyError("{} isn't a chemdb-typed url".format(db_url))
+
+    def __is_empty(self):
+        """判断是不是空数据库"""
+        return len(self.inspct.get_table_names()) == 0
+
+    def __url_is_for_chemdb(self):
+        """判断是不是chemdb类型的数据库"""
+        result = True
+        table_names = self.inspct.get_table_names()
+        if len(table_names) == 0: 
+            # new database
+            return True
+        if not set(table_names) == set(self.TB_NMAES):
+            return False
+        md = sqlalchemy.MetaData()
+        for key in self.TB_INFO.keys():
+            tb  = sqlalchemy.Table(key,  md, 
+                autoload=True, autoload_with=self.engine)
+            result = (result and set(tb.c.keys()) == \
+                set(self.TB_INFO[key].keys()))
+        return result
+
+    @property
+    def abstract(self):
+        if self.is_empty:
+            print("main:\t{}\nfiles:\t{}".format(0, 0))
+        if self.is_chemdb:
+            
+            print("main:\t{}\nfiles:\t{}".format(0, 0))
+
+    def append_data(self, p:Path):
         # setup data
         try:
-            assert len(data) != 0
+            assert os.path.isdir(p)
         except AssertionError as e:
-            raise KeyError("the length of data is 0.")
-        for i in range(len(data)): 
-            try:
-                assert os.path.isdir(data[i])
-            except AssertionError as e:
-                raise KeyError("the {}th data: '{}' ".format(i+1, data[i]) + \
-                            "don't exists or isn't a dir.")
+            raise KeyError("'{}' don't exists or isn't a dir.".format(p))
         # generate dirs list
-        dirs_list = []
-        if self.parallel:
-            def process(i):
-                dirs_list.extend(all_dirs(i))
-            pool = Pool()
-            pool.map(process, data)
-            pool.close()
-            pool.join()
-        else:
-            for i in data:
-                dirs_list.extend(all_dirs(i))
-        if len(dirs_list) > 200: dirs_list = dirs_list[:200]
-        self.df_main, self.df_files = self.__analyze_data(dirs_list)
+        dirs_list = all_dirs(p)
+        #if len(dirs_list) > 200: dirs_list = dirs_list[:200] #for test 
+        # parse dirs_list ---> pd.DataFrame
+        df_main, df_files = self.__analyze_data(dirs_list)
+        # pandas to sql
+        df_main.to_sql("main", self.engine, 
+            dtype=self.TB_main_dtype, index=False, 
+            if_exists="replace", chunksize=10000 )
+        df_files.to_sql("files", self.engine, 
+            dtype=self.TB_files_dtype, index=False, 
+            if_exists="replace", chunksize=100   )
+
 
     def __analyze_data(self, data_list:List[Path]):
         data_main = []
@@ -81,7 +129,6 @@ class ChemDB():
             return v_hash_json, v_type_of_ele, v_type_of_sys, v_num_of_point
 
         def process(i):
-                v_id   = uuid.uuid5(uuid.NAMESPACE_DNS, str(time.time()))
                 if os.path.exists(os.path.join(i, "OUTCAR")):
                     v_software = "VASP"
                     values = process_vasp(i)
@@ -90,14 +137,13 @@ class ChemDB():
                     #assert len(values) == 4
                     v_hash_json,    v_type_of_ele  = values[0:2]
                     v_type_of_sys,  v_num_of_point = values[2:4]
+                    v_id   = str(uuid.uuid5(uuid.NAMESPACE_DNS, v_hash_json))
                     data_main.append([
                         v_id,           v_software,
                         v_hash_json,    v_type_of_ele,
-                        v_type_of_sys,  v_num_of_point  ])  
-                    print("{:10} {}".format(v_software, i)) 
+                        v_type_of_sys,  v_num_of_point  ]) 
                 elif os.path.exists(os.path.join(i, "type.raw")):
                     v_software = "deepmd"
-                    print("{:10} {}".format(v_software, i))
                     
         if self.parallel:
             pool = Pool()
@@ -111,12 +157,15 @@ class ChemDB():
             'id',               'software',
             'files_hash_json',  'type_of_elements',
             'type_of_systems',  'num_of_point'           ])
+        data_main.drop_duplicates(['id'])
         data_files = pd.DataFrame(data_files, columns=[
             'hash',     'binary_contents'])
+        data_files.drop_duplicates(['hash'])
         return data_main, data_files
 
-    def show_database_abstract(self):
-        pass
+    
+
+    
 
     
 
@@ -124,11 +173,11 @@ class ChemDB():
 
 
 if __name__ == "__main__":
-    engine = 'sqlite:///./test.db'
-    data = [
-       #"/home/lgy/cal/pd_mo_o-dpmd_pot/",
-       "/home/lgy/cal/pd-mo-cluster-cal/",
-    ]
-    test = ChemDB(data, engine, parallel=True)
+    engine_url = 'sqlite:///./test.db'
+    data = "/home/lgy/cal/pd-mo-cluster-cal/"
+    #"/home/lgy/cal/pd_mo_o-dpmd_pot/",
+    
+    test = ChemDB(engine_url, parallel=True)
+    #test.append_data(data)
 
 
