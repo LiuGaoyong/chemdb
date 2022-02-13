@@ -22,7 +22,7 @@ class ChemDB():
                 'type_of_elements'  : sqlalchemy.types.Text(),
                 'type_of_systems'   : sqlalchemy.types.Text(),
                 'num_of_point'      : sqlalchemy.types.Integer() },
-        "files": {'hash'            : sqlalchemy.types.Text(),
+        "files": {'id'              : sqlalchemy.types.Text(),
                 'binary_contents'   : sqlalchemy.types.LargeBinary() }
     }
     TB_NMAES = set(TB_INFO.keys())
@@ -64,6 +64,7 @@ class ChemDB():
                 autoload=True, autoload_with=self.engine)
             result = (result and set(tb.c.keys()) == \
                 set(self.TB_INFO[key].keys()))
+            print(tb.primary_key)
         return result
 
     @property
@@ -71,7 +72,7 @@ class ChemDB():
         if self.is_empty:
             print("main:\t{}\nfiles:\t{}".format(0, 0))
         if self.is_chemdb:
-            
+
             print("main:\t{}\nfiles:\t{}".format(0, 0))
 
     def append_data(self, p:Path):
@@ -82,19 +83,17 @@ class ChemDB():
             raise KeyError("'{}' don't exists or isn't a dir.".format(p))
         # generate dirs list
         dirs_list = all_dirs(p)
-        #if len(dirs_list) > 200: dirs_list = dirs_list[:200] #for test 
+        if len(dirs_list) > 200: dirs_list = dirs_list[:200] #for test 
         # parse dirs_list ---> pd.DataFrame
-        df_main, df_files = self.__analyze_data(dirs_list)
+        data = self.__analyze_data(dirs_list)
         # pandas to sql
-        df_main.to_sql("main", self.engine, 
-            dtype=self.TB_main_dtype, index=False, 
-            if_exists="replace", chunksize=10000 )
-        df_files.to_sql("files", self.engine, 
-            dtype=self.TB_files_dtype, index=False, 
-            if_exists="replace", chunksize=100   )
+        for key in self.TB_NMAES:
+            data[key].to_sql(key, self.engine, 
+                dtype=self.TB_INFO[key], index=False, 
+                if_exists="replace", chunksize=100 )
 
 
-    def __analyze_data(self, data_list:List[Path]):
+    def __analyze_data(self, data_list:List[Path]) -> dict:
         data_main = []
         data_files = []
         def process_vasp(i):
@@ -159,9 +158,9 @@ class ChemDB():
             'type_of_systems',  'num_of_point'           ])
         data_main.drop_duplicates(['id'])
         data_files = pd.DataFrame(data_files, columns=[
-            'hash',     'binary_contents'])
-        data_files.drop_duplicates(['hash'])
-        return data_main, data_files
+            'id',        'binary_contents'])
+        data_files.drop_duplicates(['id'])
+        return {"main": data_main, "files": data_files}
 
     
 
@@ -178,6 +177,6 @@ if __name__ == "__main__":
     #"/home/lgy/cal/pd_mo_o-dpmd_pot/",
     
     test = ChemDB(engine_url, parallel=True)
-    #test.append_data(data)
+    test.append_data(data)
 
 
